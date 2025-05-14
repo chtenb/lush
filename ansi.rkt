@@ -1,5 +1,37 @@
 #lang racket/base
 
+;; internal convenience
+(define (csi  fmt . xs) (apply format (string-append "\e[" fmt) xs))
+
+;; ─── Cursor movement (relative) ────────────────────────────────────
+(define (cursor-left  n)  (if (> n 0) (csi "~aD" n) ""))
+(define (cursor-right n)  (if (> n 0) (csi "~aC" n) ""))
+(define (cursor-up    n)  (if (> n 0) (csi "~aA" n) ""))
+(define (cursor-down  n)  (if (> n 0) (csi "~aB" n) ""))
+
+;; ─── Cursor movement (absolute) ────────────────────────────────────
+;; row and col are 1-based; 1,1 is top-left corner
+(define (cursor-abs row col)        (csi "~a;~aH" row col))
+(define (cursor-col col)            (csi "~aG" col))  ; horizontal only
+
+;; ─── Save / restore cursor position ───────────────────────────────
+(define cursor-save     "\e7")      ; ESC 7  (DEC save)
+(define cursor-restore  "\e8")      ; ESC 8  (DEC restore)
+
+;; ─── Show / hide cursor ───────────────────────────────────────────
+(define cursor-hide     "\e[?25l")
+(define cursor-show     "\e[?25h")
+
+;; ─── Clear operations ─────────────────────────────────────────────
+(define clear-screen      "\e[2J")          ; entire screen
+(define clear-eol         "\e[K")           ; to end of line
+(define clear-bol         "\e[1K")          ; to beginning of line
+(define clear-line        "\e[2K")          ; whole line
+(define clear-down        "\e[J")           ; cursor → end of screen
+(define clear-up          "\e[1J")          ; top of screen → cursor
+
+
+;; ─── SGR ──────────────────────────────────────────────────────────
 (define ansi-styles
   '((reset         . "\e[0m")
 
@@ -104,13 +136,11 @@
      (error "Invalid ANSI style specifier" spec)]))
 
 
+; (display (styled "Hello world" 'bold 'yellow 'underline))
+; (display (styled "Hello world" '(bg 0 99 99) 'reverse))
+; (display (styled "█████████████████████████████" 'blink 'bg-red 'yellow))
 (define (styled str . styles)
   (string-append (apply string-append (map ansi-style styles)) str (ansi-style 'reset)))
 
 
-(display (styled "Hello world" 'bold 'yellow 'underline))
-(display (styled "Hello world" '(bg 0 99 99) 'reverse))
-(newline)
-(display (styled "█████████████████████████████" 'blink 'bg-red 'yellow))
-
-
+(provide (all-defined-out))

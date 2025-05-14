@@ -1,20 +1,13 @@
 #lang racket
-(require termconfig)   ; gives us (with-raw ...) cross‑platform
 (require soup-lib)
-(require racket/format)
+(require "ansi.rkt")
+(require "term.rkt")
+(require "keycodes.rkt")
 
 ;; ------------------------------------------------------------------
 ;; helpers (manual ANSI ⎯ no extra libs)
 ;; ------------------------------------------------------------------
-(define (fg256 n) (format "\e[38;5;~am" n))
-(define reset "\e[0m")
-(define prompt (string-append (fg256 208) "λ " reset))
-
-(define (cursor-left n)
-  (if (> n 0) (format "\e[~aD" n) (quote "")))
-(define (cursor-right n)
-  (if (> n 0) (format "\e[~aC" n) (quote "")))
-
+(define prompt (string-append (styled  "λ" '(fg 208)) " "))
 
 ;; ------------------------------------------------------------------
 ;; mutable buffer
@@ -22,20 +15,20 @@
 (struct buf (vec pos len) #:transparent #:mutable)
 (define (make-buf size) (buf (make-vector size #\space) 0 0))
 
-;; prompt is something like "\e[38;5;208mλ \e[0m"
 (define (redraw b)
   (define visible
     (list->string
-      (vector->list (vector-copy (buf-vec b) 0 (buf-len b)))))
+     (vector->list (vector-copy (buf-vec b) 0 (buf-len b)))))
 
   (define out
     (string-append
-      "\e[?25l"                       ; 1. hide cursor
-      "\r" prompt                     ; 2. return & prompt
-      visible                         ; 3. user text
-      "\e[K"                          ; 4. clear to EOL (important when shrinking)
-      (cursor-left (- (buf-len b) (buf-pos b))) ; 5. back‑up to cursor
-      "\e[?25h"))                     ; 6. show cursor again
+     cursor-hide
+     "\r"
+     prompt
+     visible
+     clear-eol
+     (cursor-left (- (buf-len b) (buf-pos b)))
+     cursor-show))
 
   (display out)
   (flush-output))
@@ -70,15 +63,15 @@
 ;; read a line in raw mode
 ;; ------------------------------------------------------------------
 (define (read-line-raw)
-  (with-raw                            ; termconfig toggles raw mode
-    (define b (make-buf 1024))
+  (with-raw
+      (define b (make-buf 1024))
     (let loop ()
       (redraw b)
       (define byte (read-byte))
       (cond
         ;; Quit
         [(or (= byte CTRL-C))]
-        
+
         ;; Enter
         [(or (= byte CR) (= byte LF))
          (newline)
@@ -109,6 +102,7 @@
 
         ;; ignore others
         [else (loop)]))))
+
 
 ;; ------------------------------------------------------------------
 ;; demo loop
