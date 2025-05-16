@@ -45,6 +45,9 @@
 (define (control? byte)
   (or (< byte 32) (= byte DEL)))
 
+(define (printable? byte)
+  (and (>= byte 32) (< byte 127)))
+
 ;; Returns #t for *both* common Backspace bytes:
 ;; 8   (Ctrl-H) – what Windows consoles send in raw mode
 ;; 127 (DEL)  – what most Unix terminals send
@@ -59,6 +62,9 @@
 (define (ctrl-c? byte) (= byte CTRL-C))
 (define (ctrl-d? byte) (= byte CTRL-D))
 (define (ctrl-z? byte) (= byte CTRL-Z))
+(define (esc? byte) (= byte ESC))
+
+
 
 
 (provide (all-defined-out))

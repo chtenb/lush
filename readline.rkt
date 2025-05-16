@@ -1,5 +1,7 @@
 #lang racket
 (require soup-lib)
+(require racket/port)
+(require racket/async-channel)
 (require "ansi.rkt")
 (require "term.rkt")
 (require "keycodes.rkt")
@@ -14,6 +16,14 @@
 ;; ------------------------------------------------------------------
 (struct buf (vec pos len) #:transparent #:mutable)
 (define (make-buf size) (buf (make-vector size #\space) 0 0))
+
+(define (move-left b n)
+  (when (> (buf-pos b) 0)
+    (set-buf-pos! b (sub1 (buf-pos b)))))
+
+(define (move-right b n)
+   (when (< (buf-pos b) (buf-len b))
+     (set-buf-pos! b (add1 (buf-pos b)))))
 
 (define (redraw b)
   (define visible
@@ -51,65 +61,89 @@
     (set-buf-pos! b (sub1 (buf-pos b)))
     (set-buf-len! b (sub1 (buf-len b)))))
 
-;; ------------------------------------------------------------------
-;; key codes
-;; ------------------------------------------------------------------
-(define BS-W  8)   (define BS-U 127)
-(define ESC  27)   (define CR   13) (define LF 10)
-(define LEFT 68)   (define RIGHT 67)
-(define CTRL-C 3)
+; This does not work, because read-byte blocks the entire OS-thread on windows
+;; read one byte, but return #f if nothing arrives within N ms
+; (define (read-byte/timeout ms [in (current-input-port)])
+;   (define ch (make-channel))
+;   (thread
+;     (λ ()
+;       (define b (read-byte in))
+;       (channel-put ch b)))
+;   (sync/timeout (/ ms 1000.0) ch))
+
+; This implementation polls every 1ms
+;; read one byte, but return #f if nothing arrives within N ms
+(define (read-byte/timeout ms [in (current-input-port)])
+  (define deadline (+ (current-inexact-milliseconds) ms))
+  (let loop ()
+    (cond
+      [(byte-ready? in) (read-byte in)]
+      [(> (current-inexact-milliseconds) deadline) #f]
+      [else (sleep 0.001) (loop)])))
+
+(define esc-timeout 25.0)
 
 ;; ------------------------------------------------------------------
 ;; read a line in raw mode
 ;; ------------------------------------------------------------------
 (define (read-line-raw)
   (with-raw
-      (define b (make-buf 1024))
-    (let loop ()
+    (define b (make-buf 1024))
+      
+    (define (loop)
       (redraw b)
       (define byte (read-byte))
+      (interpret-byte byte))
+
+    (define (interpret-byte byte)
       (cond
         ;; Quit
-        [(or (= byte CTRL-C))]
+        [(ctrl-c? byte) (void)]
+        [(ctrl-d? byte) (void)]
 
         ;; Enter
-        [(or (= byte CR) (= byte LF))
+        [(enter? byte)
          (newline)
          (vector->string
           (vector-copy (buf-vec b) 0 (buf-len b)))]
 
         ;; Backspace
-        [(or (= byte BS-W) (= byte BS-U))
+        [(backspace? byte)
          (backspace! b)
          (loop)]
 
         ;; Arrow keys: ESC [ C / ESC [ D
-        [(= byte ESC)
-         (when (= (read-byte) 91)            ; '['
-           (define final (read-byte))
-           (cond [(= final LEFT)
-                  (when (> (buf-pos b) 0)
-                    (set-buf-pos! b (sub1 (buf-pos b))))]
-                 [(= final RIGHT)
-                  (when (< (buf-pos b) (buf-len b))
-                    (set-buf-pos! b (add1 (buf-pos b))))]))
-         (loop)]        ;; Arrow keys
+        [(esc? byte)
+         (define second (read-byte/timeout esc-timeout))
+         (cond
+           [(not second) (loop)] ; no next byte within timeout: treat as bare Esc
+           [(= second 91) ; [ (we now commit to parsing escape sequence)
+            (define third (read-byte/timeout esc-timeout))
+            (cond
+              [(not third) (loop)] ; no next byte within 25 ms, ignore invalid escape sequence
+              [(= third 68) (move-left b 1) (loop)] ; D
+              [(= third 67) (move-right b 1) (loop)] ; C
+              [else (loop)])]
+           [else (interpret-byte second)])] ; not an escape sequence, proceed interpreting second as normal
 
         ;; printable ASCII
-        [(and (>= byte 32) (< byte 127))
+        [(printable? byte)
          (insert! b (integer->char byte))
          (loop)]
 
         ;; ignore others
-        [else (loop)]))))
+        [else (loop)]))
+    
+    (loop)))
 
 
 ;; ------------------------------------------------------------------
 ;; demo loop
 ;; ------------------------------------------------------------------
-(define (repl)
+(define (main)
   (define line (read-line-raw))
-  (cond [(string=? line "quit") (void)]
-        [else (printf "You typed: ~a\n" line) (repl)]))
+  (cond [(void? line) (void)]
+        [else (printf "You typed: ~a\n" line) (main)]))
 
-(repl)
+(module+ main
+  (main))
